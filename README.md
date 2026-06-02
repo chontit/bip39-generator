@@ -20,7 +20,7 @@ A fully offline, single-file HTML BIP39 Seed Generator designed for maximum secu
 
 ### 📥 How to Download and Use
 *For the highest level of security, **DO NOT** run this tool on a computer connected to the internet.*
-1. **Download the file:** [Right-click here and select "Save link as..."](https://raw.githubusercontent.com/chontit/bip39-generator/main/BIP39-Generator.html)
+1. **Download the file:** [Right-click here and select "Save link as..."](https://github.com/chontit/bip39-generator/releases/download/v1.0.0/BIP39-Generator.html)
 2. Transfer the file to a clean, offline USB drive.
 3. Boot your offline machine (e.g., Tails OS) with internet disabled.
 4. Open the `BIP39-Generator.html` file using a Tor Browser.
@@ -70,7 +70,7 @@ md5sum BIP39-Generator.html
 
 ### 📥 วิธีดาวน์โหลดและใช้งาน
 *เพื่อความปลอดภัยสูงสุด **ห้าม** ใช้งาน Seedphrase ที่สร้างจากไฟล์นี้บนคอมพิวเตอร์ที่เชื่อมต่ออินเทอร์เน็ตโดยเด็ดขาด*
-1. **ดาวน์โหลดไฟล์:** [คลิกขวาที่ลิงก์นี้แล้วเลือก "Save link as..."](https://raw.githubusercontent.com/chontit/bip39-generator/main/BIP39-Generator.html)
+1. **ดาวน์โหลดไฟล์:** [คลิกขวาที่ลิงก์นี้แล้วเลือก "Save link as..."](https://github.com/chontit/bip39-generator/releases/download/v1.0.0/BIP39-Generator.html)
 2. คัดลอกไฟล์ลงใน USB Flash Drive ที่มีความปลอดภัย
 3. บูตเข้าสู่ระบบปฏิบัติการออฟไลน์ (เช่น Tails OS) 
 4. เปิดไฟล์ `BIP39-Generator.html` ผ่านเบราว์เซอร์ (Tor Browser)
