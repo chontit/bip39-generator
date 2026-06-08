@@ -1,0 +1,255 @@
+<!doctype html>
+<!-- ============================================================================
+  BIP39 ENTROPY → SEED PHRASE  (เวอร์ชันกระชับ + คำนวณ realtime)
+  ทำงานออฟไลน์ 100% ไฟล์เดียว ใช้ primitive เดียวคือ SHA-256 (มีในเบราว์เซอร์)
+  หลักการ Bitcoiner: "Don't trust, verify" — ทุกขั้นตอนแสดงให้ตรวจสอบย้อนกลับได้
+  ตรวจสอบ engine: entropy 16 ไบต์ศูนย์ ต้องได้ "abandon … about" (แถบ ✓ ด้านบน)
+============================================================================ -->
+<html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BIP39 Entropy → Seed</title>
+<style>
+/* ธีมมืดเรียบ อ่านง่าย ไม่พึ่งฟอนต์/เน็ตภายนอก */
+body{background:#0a0e0a;color:#9fe89f;font:14px/1.55 monospace;margin:auto;max-width:880px;padding:14px}
+h1{font-size:16px;color:#5fd0ff;border-bottom:1px solid #234;padding-bottom:6px}
+label{color:#7fb;display:block;margin:10px 0 2px}
+select,textarea{background:#111;color:#9fe89f;border:1px solid #2a3a2a;font:13px monospace;padding:6px;width:100%;box-sizing:border-box}
+button{background:#143;color:#bfffbf;border:1px solid #3a6;padding:7px 12px;cursor:pointer}
+button:hover{background:#265}
+.danger{background:#3a1414;border-color:#a33;color:#ffb3b3}      /* ปุ่มล้างข้อมูล โทนแดงเตือน */
+.danger:hover{background:#552020}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.row>div{flex:1;min-width:150px}
+#st{font-size:12px;padding:4px 8px;border-radius:4px;display:inline-block;margin-bottom:8px}
+.ok{background:#063;color:#bfffbf}.bad{background:#600;color:#ffb}
+#cnt{font-size:13px;margin:6px 0;color:#7fb}
+.step{border:1px solid #1c2a1c;border-left:3px solid #5fd0ff;padding:8px 10px;margin:8px 0;background:#080c08}
+.step b{color:#5fd0ff}.exp{color:#9ab;font-size:12px;margin:3px 0 6px;line-height:1.5}
+code{color:#ffd24a;word-break:break-all}.mn{color:#fff;font-size:16px;letter-spacing:.5px}.err{color:#ff7a7a}.warn{color:#ffd24a}
+table{width:100%;border-collapse:collapse;font-size:12px;margin-top:4px}
+td,th{border:1px solid #1c2a1c;padding:3px 6px;text-align:left}th{color:#7fb}
+.bin{color:#9fe89f}.cs{color:#ff8a3a;font-weight:bold}.dec{color:#5fd0ff}.w{color:#fff}
+.hi{background:#5a2a00;color:#ffd24a;padding:0 2px;border-radius:2px}  /* ไฮไลต์ HEX ที่เป็นที่มาของ checksum */
+.lead{background:#06120c;border:1px solid #1c3a2a;padding:10px;margin:8px 0}
+footer{text-align:center;color:#5a8a6a;margin-top:20px;padding-top:10px;border-top:1px solid #1c2a1c;font-size:12px}
+</style></head><body>
+<h1>BIP39 Entropy → Seed Phrase · Fully Offline</h1>
+<span id="st">ENGINE: กำลังทดสอบ…</span>
+
+<div class="row">
+  <div><label>เลือกประเภท Entropy</label>
+    <select id="type">
+      <option value="2">โยนเหรียญ / Binary (0 และ 1)</option>
+      <option value="16">ลูกเต๋า 16 หน้า / HEX Dice (0-9 และ A-F)</option>
+      <option value="6">ลูกเต๋า 6 หน้า / Normal Dice (1-6)</option>
+      <option value="52">ไพ่ 52 ใบ (เช่น ah ks 7c)</option>
+    </select></div>
+  <div><label>จำนวนคำที่ต้องการ</label>
+    <select id="words"><option>12</option><option>15</option><option>18</option><option>21</option><option>24</option></select></div>
+  <div><label>วิธีการแปลง Entropy → Seed</label>
+    <select id="mode">
+      <option value="real">Raw Entropy (แปลงตรง ๆ จาก Entropy)</option>
+      <option value="1">Hash ผ่าน SHA-256 จำนวน 1 ครั้ง</option>
+      <option value="2">Double-SHA-256 (Hash 2 ครั้ง)</option>
+      <option value="3">Triple-SHA-256 (Hash 3 ครั้ง)</option>
+    </select></div>
+</div>
+
+<label>ป้อนข้อมูล Entropy <span id="hint" style="color:#5fd0ff"></span></label>
+<textarea id="inp" rows="3" oninput="update()"></textarea>
+<div id="cnt"></div>
+<div class="row">
+  <div style="flex:0"><button onclick="rnd()">🎲 สุ่ม Entropy</button></div>
+  <div style="flex:0"><button class="danger" onclick="clr()">🗑 ล้างข้อมูล</button></div>
+</div>
+<div id="out"></div>
+
+<script>
+"use strict";
+/* รายการคำมาตรฐาน BIP39 ภาษาอังกฤษ 2048 คำ ฝังในไฟล์เพื่อทำงานออฟไลน์ */
+const WL="abandon ability able about above absent absorb abstract absurd abuse access accident account accuse achieve acid acoustic acquire across act action actor actress actual adapt add addict address adjust admit adult advance advice aerobic affair afford afraid again age agent agree ahead aim air airport aisle alarm album alcohol alert alien all alley allow almost alone alpha already also alter always amateur amazing among amount amused analyst anchor ancient anger angle angry animal ankle announce annual another answer antenna antique anxiety any apart apology appear apple approve april arch arctic area arena argue arm armed armor army around arrange arrest arrive arrow art artefact artist artwork ask aspect assault asset assist assume asthma athlete atom attack attend attitude attract auction audit august aunt author auto autumn average avocado avoid awake aware away awesome awful awkward axis baby bachelor bacon badge bag balance balcony ball bamboo banana banner bar barely bargain barrel base basic basket battle beach bean beauty because become beef before begin behave behind believe below belt bench benefit best betray better between beyond bicycle bid bike bind biology bird birth bitter black blade blame blanket blast bleak bless blind blood blossom blouse blue blur blush board boat body boil bomb bone bonus book boost border boring borrow boss bottom bounce box boy bracket brain brand brass brave bread breeze brick bridge brief bright bring brisk broccoli broken bronze broom brother brown brush bubble buddy budget buffalo build bulb bulk bullet bundle bunker burden burger burst bus business busy butter buyer buzz cabbage cabin cable cactus cage cake call calm camera camp can canal cancel candy cannon canoe canvas canyon capable capital captain car carbon card cargo carpet carry cart case cash casino castle casual cat catalog catch category cattle caught cause caution cave ceiling celery cement census century cereal certain chair chalk champion change chaos chapter charge chase chat cheap check cheese chef cherry chest chicken chief child chimney choice choose chronic chuckle chunk churn cigar cinnamon circle citizen city civil claim clap clarify claw clay clean clerk clever click client cliff climb clinic clip clock clog close cloth cloud clown club clump cluster clutch coach coast coconut code coffee coil coin collect color column combine come comfort comic common company concert conduct confirm congress connect consider control convince cook cool copper copy coral core corn correct cost cotton couch country couple course cousin cover coyote crack cradle craft cram crane crash crater crawl crazy cream credit creek crew cricket crime crisp critic crop cross crouch crowd crucial cruel cruise crumble crunch crush cry crystal cube culture cup cupboard curious current curtain curve cushion custom cute cycle dad damage damp dance danger daring dash daughter dawn day deal debate debris decade december decide decline decorate decrease deer defense define defy degree delay deliver demand demise denial dentist deny depart depend deposit depth deputy derive describe desert design desk despair destroy detail detect develop device devote diagram dial diamond diary dice diesel diet differ digital dignity dilemma dinner dinosaur direct dirt disagree discover disease dish dismiss disorder display distance divert divide divorce dizzy doctor document dog doll dolphin domain donate donkey donor door dose double dove draft dragon drama drastic draw dream dress drift drill drink drip drive drop drum dry duck dumb dune during dust dutch duty dwarf dynamic eager eagle early earn earth easily east easy echo ecology economy edge edit educate effort egg eight either elbow elder electric elegant element elephant elevator elite else embark embody embrace emerge emotion employ empower empty enable enact end endless endorse enemy energy enforce engage engine enhance enjoy enlist enough enrich enroll ensure enter entire entry envelope episode equal equip era erase erode erosion error erupt escape essay essence estate eternal ethics evidence evil evoke evolve exact example excess exchange excite exclude excuse execute exercise exhaust exhibit exile exist exit exotic expand expect expire explain expose express extend extra eye eyebrow fabric face faculty fade faint faith fall false fame family famous fan fancy fantasy farm fashion fat fatal father fatigue fault favorite feature february federal fee feed feel female fence festival fetch fever few fiber fiction field figure file film filter final find fine finger finish fire firm first fiscal fish fit fitness fix flag flame flash flat flavor flee flight flip float flock floor flower fluid flush fly foam focus fog foil fold follow food foot force forest forget fork fortune forum forward fossil foster found fox fragile frame frequent fresh friend fringe frog front frost frown frozen fruit fuel fun funny furnace fury future gadget gain galaxy gallery game gap garage garbage garden garlic garment gas gasp gate gather gauge gaze general genius genre gentle genuine gesture ghost giant gift giggle ginger giraffe girl give glad glance glare glass glide glimpse globe gloom glory glove glow glue goat goddess gold good goose gorilla gospel gossip govern gown grab grace grain grant grape grass gravity great green grid grief grit grocery group grow grunt guard guess guide guilt guitar gun gym habit hair half hammer hamster hand happy harbor hard harsh harvest hat have hawk hazard head health heart heavy hedgehog height hello helmet help hen hero hidden high hill hint hip hire history hobby hockey hold hole holiday hollow home honey hood hope horn horror horse hospital host hotel hour hover hub huge human humble humor hundred hungry hunt hurdle hurry hurt husband hybrid ice icon idea identify idle ignore ill illegal illness image imitate immense immune impact impose improve impulse inch include income increase index indicate indoor industry infant inflict inform inhale inherit initial inject injury inmate inner innocent input inquiry insane insect inside inspire install intact interest into invest invite involve iron island isolate issue item ivory jacket jaguar jar jazz jealous jeans jelly jewel job join joke journey joy judge juice jump jungle junior junk just kangaroo keen keep ketchup key kick kid kidney kind kingdom kiss kit kitchen kite kitten kiwi knee knife knock know lab label labor ladder lady lake lamp language laptop large later latin laugh laundry lava law lawn lawsuit layer lazy leader leaf learn leave lecture left leg legal legend leisure lemon lend length lens leopard lesson letter level liar liberty library license life lift light like limb limit link lion liquid list little live lizard load loan lobster local lock logic lonely long loop lottery loud lounge love loyal lucky luggage lumber lunar lunch luxury lyrics machine mad magic magnet maid mail main major make mammal man manage mandate mango mansion manual maple marble march margin marine market marriage mask mass master match material math matrix matter maximum maze meadow mean measure meat mechanic medal media melody melt member memory mention menu mercy merge merit merry mesh message metal method middle midnight milk million mimic mind minimum minor minute miracle mirror misery miss mistake mix mixed mixture mobile model modify mom moment monitor monkey monster month moon moral more morning mosquito mother motion motor mountain mouse move movie much muffin mule multiply muscle museum mushroom music must mutual myself mystery myth naive name napkin narrow nasty nation nature near neck need negative neglect neither nephew nerve nest net network neutral never news next nice night noble noise nominee noodle normal north nose notable note nothing notice novel now nuclear number nurse nut oak obey object oblige obscure observe obtain obvious occur ocean october odor off offer office often oil okay old olive olympic omit once one onion online only open opera opinion oppose option orange orbit orchard order ordinary organ orient original orphan ostrich other outdoor outer output outside oval oven over own owner oxygen oyster ozone pact paddle page pair palace palm panda panel panic panther paper parade parent park parrot party pass patch path patient patrol pattern pause pave payment peace peanut pear peasant pelican pen penalty pencil people pepper perfect permit person pet phone photo phrase physical piano picnic picture piece pig pigeon pill pilot pink pioneer pipe pistol pitch pizza place planet plastic plate play please pledge pluck plug plunge poem poet point polar pole police pond pony pool popular portion position possible post potato pottery poverty powder power practice praise predict prefer prepare present pretty prevent price pride primary print priority prison private prize problem process produce profit program project promote proof property prosper protect proud provide public pudding pull pulp pulse pumpkin punch pupil puppy purchase purity purpose purse push put puzzle pyramid quality quantum quarter question quick quit quiz quote rabbit raccoon race rack radar radio rail rain raise rally ramp ranch random range rapid rare rate rather raven raw razor ready real reason rebel rebuild recall receive recipe record recycle reduce reflect reform refuse region regret regular reject relax release relief rely remain remember remind remove render renew rent reopen repair repeat replace report require rescue resemble resist resource response result retire retreat return reunion reveal review reward rhythm rib ribbon rice rich ride ridge rifle right rigid ring riot ripple risk ritual rival river road roast robot robust rocket romance roof rookie room rose rotate rough round route royal rubber rude rug rule run runway rural sad saddle sadness safe sail salad salmon salon salt salute same sample sand satisfy satoshi sauce sausage save say scale scan scare scatter scene scheme school science scissors scorpion scout scrap screen script scrub sea search season seat second secret section security seed seek segment select sell seminar senior sense sentence series service session settle setup seven shadow shaft shallow share shed shell sheriff shield shift shine ship shiver shock shoe shoot shop short shoulder shove shrimp shrug shuffle shy sibling sick side siege sight sign silent silk silly silver similar simple since sing siren sister situate six size skate sketch ski skill skin skirt skull slab slam sleep slender slice slide slight slim slogan slot slow slush small smart smile smoke smooth snack snake snap sniff snow soap soccer social sock soda soft solar soldier solid solution solve someone song soon sorry sort soul sound soup source south space spare spatial spawn speak special speed spell spend sphere spice spider spike spin spirit split spoil sponsor spoon sport spot spray spread spring spy square squeeze squirrel stable stadium staff stage stairs stamp stand start state stay steak steel stem step stereo stick still sting stock stomach stone stool story stove strategy street strike strong struggle student stuff stumble style subject submit subway success such sudden suffer sugar suggest suit summer sun sunny sunset super supply supreme sure surface surge surprise surround survey suspect sustain swallow swamp swap swarm swear sweet swift swim swing switch sword symbol symptom syrup system table tackle tag tail talent talk tank tape target task taste tattoo taxi teach team tell ten tenant tennis tent term test text thank that theme then theory there they thing this thought three thrive throw thumb thunder ticket tide tiger tilt timber time tiny tip tired tissue title toast tobacco today toddler toe together toilet token tomato tomorrow tone tongue tonight tool tooth top topic topple torch tornado tortoise toss total tourist toward tower town toy track trade traffic tragic train transfer trap trash travel tray treat tree trend trial tribe trick trigger trim trip trophy trouble truck true truly trumpet trust truth try tube tuition tumble tuna tunnel turkey turn turtle twelve twenty twice twin twist two type typical ugly umbrella unable unaware uncle uncover under undo unfair unfold unhappy uniform unique unit universe unknown unlock until unusual unveil update upgrade uphold upon upper upset urban urge usage use used useful useless usual utility vacant vacuum vague valid valley valve van vanish vapor various vast vault vehicle velvet vendor venture venue verb verify version very vessel veteran viable vibrant vicious victory video view village vintage violin virtual virus visa visit visual vital vivid vocal voice void volcano volume vote voyage wage wagon wait walk wall walnut want warfare warm warrior wash wasp waste water wave way wealth weapon wear weasel weather web wedding weekend weird welcome west wet whale what wheat wheel when where whip whisper wide width wife wild will win window wine wing wink winner winter wire wisdom wise wish witness wolf woman wonder wood wool word work world worry worth wrap wreck wrestle wrist write wrong yard year yellow you young youth zebra zero zone zoo".split(" "); // แตกสตริงคำเป็นอาเรย์ดัชนี 0..2047
+
+/* ---- ฟังก์ชันช่วยพื้นฐาน ---- */
+const enc=new TextEncoder();                                    // ตัวแปลงข้อความ -> ไบต์ UTF-8 (ใช้กับเต๋า/ไพ่)
+const hx=b=>[...b].map(x=>x.toString(16).padStart(2,"0")).join(""); // ไบต์ -> สตริง hex สำหรับแสดงผล
+const $=id=>document.getElementById(id);                        // ทางลัดเรียก element ตาม id
+const val=id=>$(id).value;                                      // ทางลัดอ่านค่าจาก element
+async function sha256(b){return new Uint8Array(await crypto.subtle.digest("SHA-256",b));} // SHA-256 (primitive เดียว)
+const grp=(s,n)=>s.match(new RegExp(".{1,"+n+"}","g")).join(" ");// แทรกช่องว่างทุก n อักขระให้อ่านง่าย
+const NEED={12:128,15:160,18:192,21:224,24:256};                // จำนวนบิต entropy ตามจำนวนคำ
+const symNeeded=(t,words)=>Math.ceil(NEED[words]/Math.log2(t)); // จำนวนสัญลักษณ์ที่ต้องป้อนให้ครบ ENT บิต
+
+/* ---- อ่าน input ตามชนิด -> หลัก (digits) + สตริงสะอาด ---- */
+function parse(t,raw){
+  raw=raw.toLowerCase();                                        // ทำพิมพ์เล็กให้สม่ำเสมอ
+  if(t==2)  return {dig:[...raw].filter(c=>c=="0"||c=="1").map(Number), s:raw.replace(/[^01]/g,"")};            // เหรียญ: 0/1
+  if(t==16) return {dig:[...raw].filter(c=>/[0-9a-f]/.test(c)).map(c=>parseInt(c,16)), s:raw.replace(/[^0-9a-f]/g,"")}; // HEX: ตัวละ 4 บิต
+  if(t==6){ const d=[...raw].filter(c=>/[1-6]/.test(c)); return {dig:d.map(c=>(+c)%6), s:d.join("")}; }          // เต๋า6: หน้า 6 = เลข 0
+  const m=raw.match(/([2-9tjqka])([cdhs])/g)||[],R="a23456789tjqk",S="cdhs";                                    // ไพ่: อันดับ+ดอก
+  return {dig:m.map(c=>R.indexOf(c[0])*4+S.indexOf(c[1])), s:m.join("")};
+}
+
+/* ---- โหมด Real: รวม digits เป็นเลขฐานสองความกว้างคงที่ แล้วตัดบิตแรก ---- */
+function realBits(dig,base,need){
+  let v=0n,B=BigInt(base); for(const d of dig) v=v*B+BigInt(d);  // รวม digits เป็นจำนวนเต็มใหญ่ฐาน base
+  const w=Math.ceil(dig.length*Math.log2(base));                // ความกว้างฟิลด์ตามทฤษฎี (บิต)
+  const s=v.toString(2).padStart(w,"0");                        // เลขฐานสอง MSB-first เติม 0 หน้า
+  return s.length<need?null:s.slice(0,need);                    // บิตไม่พอ -> null ; ไม่งั้นใช้บิตแรก
+}
+
+/* ---- แปลง input ของฐานยกกำลังสอง (เหรียญ/HEX) เป็น "RAW Byte" สำหรับ hash โดยตรง (ไม่ผ่าน UTF-8) ---- */
+function inputToBytes(t,dig){
+  let bits="";                                                  // สตริงบิตของ input
+  if(t==2) for(const d of dig) bits+=d;                         // เหรียญ: 1 บิต/หลัก
+  else     for(const d of dig) bits+=d.toString(2).padStart(4,"0"); // HEX: 4 บิต/หลัก
+  if(bits.length%8) bits=bits.padEnd(bits.length+8-bits.length%8,"0"); // เติม 0 ให้ครบไบต์สุดท้าย
+  const out=new Uint8Array(bits.length/8);                      // แปลงเป็นไบต์
+  for(let i=0;i<out.length;i++) out[i]=parseInt(bits.slice(i*8,i*8+8),2);
+  return out;
+}
+
+/* ---- แกน BIP39: ไบต์ entropy -> รายละเอียดทุกขั้น ---- */
+async function bip39(ent){
+  const h=await sha256(ent);                                    // checksum มาจาก SHA256(entropy) เสมอ
+  const ENT=ent.length*8, CS=ENT/32;                            // ENT=บิต entropy, CS=บิต checksum
+  let eb=""; for(const b of ent) eb+=b.toString(2).padStart(8,"0"); // entropy -> สตริงบิต
+  let hb=""; for(const b of h)   hb+=b.toString(2).padStart(8,"0"); // SHA256(entropy) -> สตริงบิต
+  const csb=hb.slice(0,CS), all=eb+csb;                          // checksum = บิตแรก CS ตัว ; รวม = words×11 บิต
+  const g=[]; for(let i=0;i<all.length;i+=11){const bin=all.slice(i,i+11),dec=parseInt(bin,2);g.push({bin,dec,word:WL[dec]});} // 11บิต->ดัชนี->คำ
+  return {hashHex:hx(h),ENT,CS,eb,csb,all,groups:g,mnemonic:g.map(x=>x.word).join(" ")};
+}
+
+/* ---- ระบายสีสตริงบิตรวม: เขียว=entropy ส้ม=checksum เว้นวรรคทุก 11 บิต ---- */
+function colorBits(all,ENT){let o="";for(let i=0;i<all.length;i++){if(i&&i%11===0)o+=" ";o+=`<span class="${i<ENT?'bin':'cs'}">${all[i]}</span>`;}return o;}
+
+let MN="";                                                      // เก็บ mnemonic ปัจจุบันไว้ให้ปุ่ม copy
+/* ---- ตัวควบคุมหลัก: รวมขั้นตอน + แสดงทีละขั้น (เรียกอัตโนมัติทุกการเปลี่ยนแปลง) ---- */
+async function gen(){
+  const t=+val("type"),words=+val("words"),mode=val("mode"),need=NEED[words],O=$("out"); // อ่านค่าควบคุม
+  const {dig,s}=parse(t,val("inp"));                            // แปลง input
+  const typed=dig.length, real=typed*Math.log2(t);             // จำนวนที่ป้อน + เอนโทรปีจริง
+  const tname={2:"โยนเหรียญ (ฐาน 2)",16:"HEX Dice (ฐาน 16)",6:"ลูกเต๋า 6 หน้า (ฐาน 6)",52:"ไพ่ (ฐาน 52)"}[t];
+  if(typed===0){O.innerHTML=`<div class="lead">▷ เริ่มป้อนค่า Entropy ที่ได้จากการ "สุ่ม" หรือคลิกที่ 🎲 เพื่อให้ระบบสุ่ม Entropy ให้</div>`;MN="";return;}
+
+  // ----- ขั้น 1: แหล่งเอนโทรปี -----
+  const okStr=real>=need?'<span style="color:#5f5">ขนาดเพียงพอ ✓</span>':'<span class="err">ต่ำกว่าเกณฑ์ '+need+' บิต</span>';
+  let html=`<div class="step"><b>ขั้นที่ 1 — ข้อมูลที่ได้จากการ "สุ่ม" (Entropy Source)</b>
+    <div class="exp">เอนโทรปี (Entropy) คือ ความไม่แน่นอนเชิงข้อมูลอันเป็นรากฐานของกุญแจส่วนตัว (Private Key) การสร้าง Entropy ด้วยตนเองจากแหล่งสุ่มทางกายภาพ (เช่น การโยนเหรียญ, ทอยลูกเต๋า) คือการยึดหลัก Self-Sovereignty และ "Don't trust, verify" — นั่นหมายถึงเราไม่มอบความมั่นคงของกระเป๋าให้กับการสุ่มของอุปกรณ์หรือบุคคลที่สาม</div>
+    ประเภท Entropy: ${tname} · ป้อนแล้ว ${typed} ครั้ง · Raw Entropy ${real.toFixed(1)} บิต (${okStr})<br>
+    ข้อมูล Entropy: <code>${s}</code></div>`;
+
+  // ----- ขั้น 2: เข้ารหัส Input เป็น entropy -----
+  let ent;
+  if(mode==="real"){                                            // ----- โหมด Real Entropy -----
+    const bits=realBits(dig,t,need);
+    let conv="";
+    if(t==16) conv=`<div class="exp">แปลงเลขฐาน 16 (Hexadecimal) เป็นเลขฐาน 2 (Binary):</div><code>`+[...s].map(c=>c+"="+parseInt(c,16).toString(2).padStart(4,"0")).join("  ")+`</code><br>`; // HEX->Binary
+    const fullbits=(()=>{let v=0n,B=BigInt(t);for(const d of dig)v=v*B+BigInt(d);return v.toString(2).padStart(Math.ceil(typed*Math.log2(t)),"0");})();
+    html+=`<div class="step"><b>ขั้นที่ 2 — แสดงข้อมูลเป็นบิตสตรีม (Real Entropy)</b>
+      <div class="exp">นำผลลัพธ์การสุ่มทุกครั้งมาแปลงเป็นเลขฐานสอง (โดยไม่ผ่านฟังก์ชันแฮช) ทุกบิตจึงเป็นเอนโทรปีดิบที่ตรวจสอบย้อนกลับได้ถึงต้นทาง</div>
+      ${conv}บิตสตรีมเต็ม (${fullbits.length} บิต): <code>${t==16?grp(fullbits,4):grp(fullbits,8)}</code><br>
+      <div class="exp" style="margin-top:6px">ใช้ข้อมูล ${need} บิตแรกมาเป็น Entropy สำหรับสร้าง Seedphrase ต่อไป</div>`;
+    if(!bits){html+=`<span class="err">จำนวนบิตไม่พอ — ต้องการอีก ${symNeeded(t,words)-typed} ครั้ง (รวม ${symNeeded(t,words)})</span></div>`;O.innerHTML=html;MN="";return;}
+    ent=new Uint8Array(need/8); for(let i=0;i<ent.length;i++) ent[i]=parseInt(bits.slice(i*8,i*8+8),2);
+    html+=`</div>`;
+  }else{                                                        // ----- โหมด Hash -----
+    let bytes0,src;                                             // ไบต์ตั้งต้นที่จะนำไป hash + คำอธิบายแหล่งที่มา
+    if(t==2||t==16){                                            // เหรียญ/HEX: hash "ไบต์ดิบ" โดยตรง (ไม่ผ่าน UTF-8)
+      bytes0=inputToBytes(t,dig);
+      src=`การโยนเหรียญ/HEX Dice เป็นประเภทข้อมูลเลขฐานสองอยู่แล้ว จึงสามารถใช้ <u>Raw Byte</u> นำไป Hash ได้โดยตรง (ไม่ผ่าน UTF-8)<br>ไบต์ที่นำไป Hash (hex): <code>${hx(bytes0)}</code>`;
+    }else{                                                      // เต๋า6/ไพ่: ฐานไม่ลงตัวกับไบต์ จึง encode เป็น UTF-8 ก่อนรอบแรก
+      bytes0=enc.encode(s);
+      src=`ลูกเต๋า 6 หน้า/ไพ่ ไม่ใช่ข้อมูลประเภทเลขฐานสอง จึงต้องเข้ารหัส (Encode) ด้วย <u>UTF-8</u> ก่อน Hash รอบแรก<br>UTF-8 ที่นำไป hash: <code>"${s}"</code> (${bytes0.length} ไบต์)`;
+    }
+    let h=await sha256(bytes0), chain=`SHA-256( ${t==2||t==16?'Raw Byte':'UTF-8'} )`; // hash รอบแรก
+    for(let i=1;i<+mode;i++){h=await sha256(h);chain=`SHA-256( ${chain} )`;}          // hash ซ้ำตามจำนวนรอบ
+    ent=h.slice(0,need/8);                                      // ตัดไบต์แรกตามขนาด entropy
+    html+=`<div class="step"><b>ขั้นที่ 2 — นำ Entropy ไปผ่านกระบวนการ SHA-256 ×${mode} Hash</b>
+      <div class="exp">${src}<br>ผ่าน Hash Function จำนวน ${mode} รอบ เพื่อกระจายบิต (diffusion) อย่างสม่ำเสมอ (การ Hash ไม่ใช่การสุ่ม Entropy ดังนั้น ความมั่นคงที่แท้จริงถูกจำกัดด้วยเอนโทรปีต้นทางขนาด ${real.toFixed(1)} บิต เสมอ)</div>
+      ${chain}<br>ผลลัพธ์การ Hash: <code>${hx(h)}</code><br><div class="exp">ใช้ข้อมูล ${need/8} ไบต์แรกเพื่อนำไปสร้าง Seedphrase ต่อไป</div></div>`;
+    if(real<need) html+=`<div class="lead warn">⚠ เอนโทรปีต้นทางเพียง ${real.toFixed(1)} บิต — ผลที่ได้ดู "สุ่ม" แต่ความปลอดภัยจริงเท่ากับ ${real.toFixed(1)} บิตเท่านั้น</div>`;
+  }
+
+  const r=await bip39(ent);                                     // คำนวณ checksum + แตกคำ
+  MN=r.mnemonic;                                                // เก็บไว้ให้ปุ่ม copy
+
+  // ----- ขั้น 3: Entropy -----
+  html+=`<div class="step"><b>ขั้นที่ 3 — Entropy (${r.ENT} บิต)</b>
+    <div class="exp">ข้อมูลนี้คือเอนโทรปีขนาด ${r.ENT} บิตที่จะต้องนำมาใช้คำนวณเพื่อสร้าง Seedphrase สำหรับกระเป๋าบิตคอยน์ต่อไป</div>
+    hex: <code>${hx(ent)}</code><br>bin: <code class="bin">${grp(r.eb,4)}</code></div>`;
+
+  // ----- ขั้น 4: Checksum (ไฮไลต์ HEX ที่เป็นที่มาของ checksum + กางเป็น Binary) -----
+  const nHex=Math.ceil(r.CS/4);                                 // จำนวน hex char ที่ครอบคลุม checksum
+  const head=r.hashHex.slice(0,nHex), rest=r.hashHex.slice(nHex); // หัว hex ที่เกี่ยวข้อง + ที่เหลือ
+  const headBin=[...head].map(c=>parseInt(c,16).toString(2).padStart(4,"0")).join(" "); // หัว hex -> binary
+  html+=`<div class="step"><b>ขั้นที่ 4 — คำนวณ Checksum (${r.CS} บิต)</b>
+    <div class="exp">การคำนวณ Checksum ตามมาตรฐาน BIP-39 = บิตแรก ENT/32 = ${r.ENT}/32 = ${r.CS} บิต ของ SHA-256(entropy) และนำไปต่อท้าย Entropy ในขั้นตอนที่ 3 เพื่อให้กระเป๋าตรวจจับการพิมพ์ Seedphrase ผิดได้ทันที (Error Detection) — เป็นกลไกเพื่อความถูกต้องของข้อมูล มิใช่กลไกความปลอดภัย</div>
+    SHA-256(entropy): <code><span class="hi">${head}</span>${rest}</code>
+    <div class="exp" style="margin-top:6px">นำ HEX ${nHex} ตัวแรกที่ไฮไลต์ (= ${nHex*4} บิต) เป็นแปลงเป็นเลขฐานสอง (เพื่อให้เห็นที่มาของตัวเลข Checksum):</div>
+    HEX [<span class="hi">${head}</span>] = <code>${headBin}</code> → ดึง ${r.CS} บิตแรกมาใช้คำนวณ = <code class="cs">${r.csb}</code></div>`;
+
+  // ----- ขั้น 5: รวมบิต + แบ่งชุดละ 11 บิต -----
+  html+=`<div class="step"><b>ขั้นที่ 5 — รวมบิตแล้วแบ่งเป็นชุดละ 11 บิต</b>
+    <div class="exp">รวม Entropy ${r.ENT} บิตเข้ากับ Checksum ${r.CS} บิต = ${r.all.length} บิต ซึ่งเท่ากับ ${words} × 11 พอดี จากนั้นแบ่งเป็นชุดละ 11 บิต และนำไปเทียบกับลำดับคำที่ 0 ถึง 2047 ในตารางคำมาตรฐาน (wordlist) (สังเกตว่าคำสุดท้ายคือจุดที่ Entropy ผสานเข้ากับ Checksum ที่คำนวณได้)
+    <br><span class="bin">■ เขียว = entropy</span> · <span class="cs">■ ส้ม = checksum</span></div>
+    <code>${colorBits(r.all,r.ENT)}</code>
+    <table><tr><th>#</th><th>11 บิต</th><th>ดัชนี (ฐานสิบ)</th><th>คำ</th></tr>
+    ${r.groups.map((x,i)=>`<tr><td>${i+1}</td><td class="bin">${x.bin}</td><td class="dec">${x.dec}</td><td class="w">${x.word}</td></tr>`).join("")}</table></div>`;
+
+  // ----- ขั้น 6: Mnemonic + ปุ่ม copy -----
+  html+=`<div class="step"><b>ขั้นที่ 6 — Seed Phrase (BIP-39 Mnemonic, ${words} คำ)</b>
+    <div class="exp">แสดงผลลัพธ์ mnemonic ที่เราสามารถนำไปใช้งานกับ Hardware Wallet หรือ Software Wallet มาตรฐาน BIP39 โดยตรงได้ทั้งหมด (เช่น Sparrow หรือ Coldcard) เน้นย้ำให้ทำการบันทึกลงบนอุปกรณ์ออฟไลน์เท่านั้น (กระดาษ, แผ่นเหล็ก หรืออุปกรณ์จัดเก็บ Seedphrase ที่มีจำหน่ายตามท้องตลาด) ลำดับคำมีความสำคัญมาก ห้ามทำการถ่ายภาพหรือพิมพ์ในเครื่องพิมพ์ที่เชื่อมต่อกับอินเตอร์เน็ตโดยเด็ดขาด — Your keys, your coins.</div>
+    <p class="mn">${r.mnemonic}</p>
+    <button onclick="cp(this)">📋 คัดลอก (พร้อมวางใน Sparrow Wallet)</button></div>`;
+
+  O.innerHTML=html;                                             // แสดงผลทั้งหมด
+}
+
+/* ---- คัดลอก mnemonic ลงคลิปบอร์ด (ใช้ execCommand เพื่อรองรับ file:// บน Tails) ---- */
+function cp(btn){
+  const ta=document.createElement("textarea"); ta.value=MN; document.body.appendChild(ta); ta.select(); // textarea ชั่วคราว
+  try{document.execCommand("copy");}catch(e){} document.body.removeChild(ta);                            // คัดลอกแล้วลบทิ้ง
+  const o=btn.textContent; btn.textContent="✓ คัดลอกแล้ว"; setTimeout(()=>btn.textContent=o,1200);      // แจ้งผล
+}
+/* ---- จำกัดอักขระ input ให้ตรงชนิด ---- */
+function filt(){
+  const re={2:/[^01]/g,16:/[^0-9a-fA-F]/g,6:/[^1-6]/g,52:/[^acdhjkqst2-9 \n]/gi}[+val("type")]; // อักขระต้องห้ามแต่ละชนิด
+  $("inp").value=$("inp").value.replace(re,"");                // ลบตัวที่ไม่ตรงประเภท
+}
+/* ---- ตัวนับ entropy (เช่น 50/128) ปรับตามชนิด+จำนวนคำ ---- */
+function counter(){
+  const t=+val("type"),words=+val("words"),{dig}=parse(t,val("inp"));
+  const need=symNeeded(t,words),have=dig.length;
+  $("cnt").innerHTML=`เอนโทรปีที่ป้อน: <b>${have}/${need}</b> ครั้ง `+
+    (have>=need?'<span style="color:#5f5">✓ ครบ</span>':`<span class="warn">— ขาดอีก ${need-have}</span>`)+
+    ` · เป้าหมาย ${NEED[words]} บิต (${words} คำ)`;
+}
+/* ---- สุ่ม entropy จาก CSPRNG ของระบบให้ครบจำนวน ---- */
+function rnd(){
+  const t=+val("type"),words=+val("words"),n=symNeeded(t,words);
+  const a=new Uint8Array(n); crypto.getRandomValues(a);         // เลขสุ่มเข้ารหัสจากระบบ
+  const R="a23456789tjqk",S="cdhs"; let o="";
+  for(let i=0;i<n;i++){const v=a[i];
+    o += t==2?(v&1) : t==16?(v&15).toString(16) : t==6?((v%6)+1) : (R[((v%52)/4)|0]+S[(v%52)%4]+" ");}
+  $("inp").value=o.trim(); update();
+}
+function clr(){$("inp").value="";update();}                     // ล้างช่อง entropy
+function update(){filt();counter();gen();}                      // realtime: กรอง -> นับ -> คำนวณ
+
+/* ---- ผูกเหตุการณ์: เปลี่ยน dropdown ใด ๆ ก็คำนวณใหม่ทันที ---- */
+const HINTS={2:"พิมพ์ได้เฉพาะ 0 และ 1",16:"พิมพ์ได้เฉพาะ 0-9 และ A-F",6:"พิมพ์ได้เฉพาะ 1-6",52:"พิมพ์ไพ่ เช่น ah ks 7c (อันดับ a23456789tjqk + ดอก cdhs)"};
+["type","words","mode"].forEach(id=>$(id).onchange=()=>{$("hint").textContent="— "+HINTS[val("type")];update();});
+$("hint").textContent="— "+HINTS["2"]; counter(); gen();        // ตั้งค่าเริ่มต้น + คำนวณครั้งแรก
+
+/* ---- SELF-TEST: ยืนยัน engine ด้วย test vector ทางการ 2 ชุด (เทียบสตริงเต็ม 12 คำ) ---- */
+(async()=>{
+  try{
+    const a=await bip39(new Uint8Array(16));                    // เวกเตอร์ 1: entropy 16 ไบต์ "ศูนย์" (กระตุ้นบิต 0)
+    const b=await bip39(new Uint8Array(16).fill(0xff));         // เวกเตอร์ 2: entropy 16 ไบต์ "0xff" (กระตุ้นบิต 1 ทุกตัว)
+    const ok = a.mnemonic===("abandon ".repeat(11)+"about")     // ศูนย์ ต้องได้ abandon×11 + about (เทียบครบทั้ง 12 คำ)
+            && b.mnemonic===("zoo ".repeat(11)+"wrong");        // 0xff ต้องได้ zoo×11 + wrong (ยืนยัน wordlist+checksum อีกด้าน)
+    const st=$("st"); st.textContent=ok?"ระบบการคำนวณ: ✓ ตรง Test Vector BIP39 2 ชุด (ศูนย์→abandon…about, 0xff→zoo…wrong)":"ระบบการคำนวณ: ✗ ผิดพลาด อย่าใช้"; st.className=ok?"ok":"bad"; // ผ่านทั้งคู่จึงเขียว
+  }catch(e){const st=$("st");st.textContent="ระบบการคำนวณ: ✗ "+e.message;st.className="bad";} // engine พัง -> แดงพร้อมเหตุผล
+})();
+
+</script>
+<footer>© 2026 Chollatis Bitcoiner | Don't Trust, Verify.</footer>
+</body></html>
